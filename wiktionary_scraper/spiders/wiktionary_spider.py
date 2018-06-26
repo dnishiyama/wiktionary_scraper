@@ -14,7 +14,7 @@ class WiktionarySpider(scrapy.Spider):
            'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
         
 
-	# Get the list of word-language pairs
+     # Get the list of word-language pairs
         df = pd.read_csv('~/etymology_files/ety_master.csv', 
                  usecols = ['word', 'language'], 
                  converters={'word' : str, 'language': str})
@@ -24,58 +24,77 @@ class WiktionarySpider(scrapy.Spider):
         df.loc[normal_language_rows, 'language'] = None
         df = df.drop_duplicates()
         url_terms = [row[0] if row[1] is None else 'Reconstruction:'+row[1]+'/'+row[0] for row in df.values]
-        urls = ['https://en.wiktionary.org/api/rest_v1/page/html/' + term for term in url_terms[:5]]
+        urls = ['https://en.wiktionary.org/api/rest_v1/page/html/' + term for term in url_terms[:5] + ['cat']]
         
         for url in urls:
             yield scrapy.Request(url=url, meta={'all_pos': all_pos}, callback=self.parse)
-
+        
     def parse(self, response):
+        
+        # Must have this function within this context
+        def getDefsFromPOS(ety_pronunc_pos_node):
+            keep_def_tags = ('i', 'b', 'a', 'span', None)
+            node_data = []
+            for li in list(ety_pronunc_pos_node.parent.find('ol').children): # get defs from ordered list
+                if li.name != 'li': continue # This is a newline tag
+
+                if li.find('ol'): #Ordered list means the sub items are the definition
+                    for sub_li in list(li.find('ol').children):
+                        if sub_li.name != 'li': continue # Skip newline tags
+
+                        for child in sub_li.children:
+                            if child.name not in keep_def_tags: child.clear() #Get rid of quotes and subitems
+
+                        node_data.append(sub_li.text.strip())
+
+                else: # otherwise grab the text
+                    for child in li.children:
+                        if child.name not in keep_def_tags: child.clear() #Get rid of quotes and subitems
+                    node_data.append(li.text.strip())
+            return node_data
+        
         all_pos = response.meta['all_pos']
+        
+        soup = BeautifulSoup(response.body, 'html.parser')
+        
         page = response.url.replace('https://en.wiktionary.org/api/rest_v1/page/html/', '')
         page = re.sub('Reconstruction:[^\/]+?\/(.*)', r'\1', page) #Remove reconstruction text if necessary
-
-        soup = BeautifulSoup(response.body, 'html.parser')
-
         page_data = {'term': page} # Variable to store the data
 
         for lang_node in soup.find_all('h2'): # Go through each Language
             language = lang_node.text.strip()
+            language_entries = [{}]
 
             for ety_pronunc_pos_node in lang_node.parent.find_all('h3'): # Go through each ety,pronu, or pos
                 node_data = []
-                node_class = re.sub('_\d+| \d+', '', ety_pronunc_pos_node.text).lower()
-                node_text = ety_pronunc_pos_node.text.lower()
-                #print(node_class, node_text)
+                node_class = re.sub('_\d+| \d+', '', ety_pronunc_pos_node.text).lower() #removed '_x' info
 
                 if node_class == 'etymology':
-                    node_data = ety_pronunc_pos_node.parent.find('p').text #Only looking at the first <p> element
+                    #Only looking at the first <p> element for etymology text
+                    entry_data = {'etymology': ety_pronunc_pos_node.parent.find('p').text}
 
+                    for sub_ety_pos in ety_pronunc_pos_node.parent.find_all('h4'):
+                        if sub_ety_pos.text.lower() in all_pos:
+                            entry_data[sub_ety_pos.text.lower()] = getDefsFromPOS(sub_ety_pos)
+
+                    if any(['etymology' in entry for entry in language_entries]): #If an etymology already exists add to new entry
+                        language_entries.append(entry_data)
+                    else:
+                        language_entries[0].update(entry_data)
+
+                # Need to see if there are sub items of this etymology
                 elif node_class == 'pronunciation':
                     ipa_nodes = ety_pronunc_pos_node.parent.select('span.IPA') #dataquest.io/blog/web-scraping-tutorial-python/
-                    if ipa_nodes: node_data = ipa_nodes[0].text
+                    if ipa_nodes: #Only add pronunciation if there are ipa_nodes
+                        node_data = ipa_nodes[0].text
+                        language_entries[0]['pronunciation'] = node_data
 
                 elif node_class in all_pos: # Here are the definitions
-                    for li in list(ety_pronunc_pos_node.parent.find('ol').children): # get defs from ordered list
-                        if li.name != 'li': continue # This is a newline tag
-
-                        if li.find('ol'): #Ordered list means the sub items are the definition
-                            for sub_li in list(li.find('ol').children):
-                                if sub_li.name != 'li': continue # Skip newline tags
-
-                                for child in sub_li.children:
-                                    if child.name not in ('a', 'span', None): child.clear() #Get rid of quotes and subitems
-
-                                node_data.append(sub_li.text.strip())
-
-                        else: # otherwise grab the text
-
-                            for child in li.children:
-                                if child.name not in ('a', 'span', None): child.clear() #Get rid of quotes and subitems
-                            node_data.append(li.text.strip())
+                    language_entries[0][node_class] = getDefsFromPOS(ety_pronunc_pos_node)
 
                 else: # Skip all other node_classes
                     continue
 
-                page_data.setdefault(language, {})[node_text] = node_data
+                page_data[language] = language_entries #Add all the language entries to the language 
 
         yield page_data
