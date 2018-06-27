@@ -13,7 +13,16 @@ class WiktionarySpider(scrapy.Spider):
            'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun', 
            'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
         
-
+        # Option #2 for word-language pairs
+        #cursor.execute('SELECT word, language_name \
+        #                FROM etymologies e, languages l\
+        #                WHERE e.language_code = l.language_code AND _id NOT IN (SELECT etymology_id FROM entry_connections) \
+        #                limit 10')
+        #wls = [[w.decode('utf-8','replace').strip(), l.decode()] for w, l in cursor.fetchall()]; wls
+        #url_terms = [row[0] if not row[1].startswith('Proto') else 'Reconstruction:'+row[1]+'/'+row[0] for row in wls]; url_terms
+        #for url in set(url_terms):
+        #print(url)
+        
      # Get the list of word-language pairs
         df = pd.read_csv('~/etymology_files/ety_master.csv', 
                  usecols = ['word', 'language'], 
@@ -24,7 +33,7 @@ class WiktionarySpider(scrapy.Spider):
         df.loc[normal_language_rows, 'language'] = None
         df = df.drop_duplicates()
         url_terms = [row[0] if row[1] is None else 'Reconstruction:'+row[1]+'/'+row[0] for row in df.values]
-        urls = ['https://en.wiktionary.org/api/rest_v1/page/html/' + term for term in url_terms[:5] + ['cat']]
+        urls = ['https://en.wiktionary.org/api/rest_v1/page/html/' + term for term in url_terms]
         
         for url in urls:
             yield scrapy.Request(url=url, meta={'all_pos': all_pos}, callback=self.parse)
@@ -71,7 +80,11 @@ class WiktionarySpider(scrapy.Spider):
 
                 if node_class == 'etymology':
                     #Only looking at the first <p> element for etymology text
-                    entry_data = {'etymology': ety_pronunc_pos_node.parent.find('p').text}
+                    p_node = ety_pronunc_pos_node.parent.find('p')
+                    if p_node is not None: 
+                        entry_data = {'etymology': p_node.text}
+                    else:
+                        continue
 
                     for sub_ety_pos in ety_pronunc_pos_node.parent.find_all('h4'):
                         if sub_ety_pos.text.lower() in all_pos:
