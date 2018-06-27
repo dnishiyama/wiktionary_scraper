@@ -44,6 +44,7 @@ class WiktionarySpider(scrapy.Spider):
         def getDefsFromPOS(ety_pronunc_pos_node):
             keep_def_tags = ('i', 'b', 'a', 'span', None)
             node_data = []
+	    if ety_pronunc_pos_node.parent.find('ol') is None: return None
             for li in list(ety_pronunc_pos_node.parent.find('ol').children): # get defs from ordered list
                 if li.name != 'li': continue # This is a newline tag
 
@@ -88,7 +89,11 @@ class WiktionarySpider(scrapy.Spider):
 
                     for sub_ety_pos in ety_pronunc_pos_node.parent.find_all('h4'):
                         if sub_ety_pos.text.lower() in all_pos:
-                            entry_data[sub_ety_pos.text.lower()] = getDefsFromPOS(sub_ety_pos)
+                            defs = getDefsFromPOS(sub_ety_pos)
+                            if defs is None:
+                                continue
+                            else:
+                                entry_data[sub_ety_pos.text.lower()] = defs
 
                     if any(['etymology' in entry for entry in language_entries]): #If an etymology already exists add to new entry
                         language_entries.append(entry_data)
@@ -103,7 +108,11 @@ class WiktionarySpider(scrapy.Spider):
                         language_entries[0]['pronunciation'] = node_data
 
                 elif node_class in all_pos: # Here are the definitions
-                    language_entries[0][node_class] = getDefsFromPOS(ety_pronunc_pos_node)
+                    defs = getDefsFromPOS(ety_pronunc_pos_node)
+                    if defs is None:
+                        continue
+                    else:
+                        language_entries[0][node_class] = defs
 
                 else: # Skip all other node_classes
                     continue
