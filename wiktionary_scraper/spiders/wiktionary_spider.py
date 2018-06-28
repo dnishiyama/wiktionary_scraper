@@ -1,42 +1,30 @@
-import scrapy, re, pandas as pd
+import scrapy, re, pandas as pd, mysql.connector, os
 from bs4 import BeautifulSoup
 
 class WiktionarySpider(scrapy.Spider):
     name = "wiktionary_spider"
-
+    
     def start_requests(self):
-        all_pos = ['adfix', 'adjective', 'adnoun', 'adverb', 'article', 'auxiliary verb', 'cardinal number', 'collective numeral', 
-           'conjunction', 'coverb', 'demonstrative determiner', 'demonstrative pronoun', 'determinative', 'determiner', 
-           'gerund', 'indefinite pronoun', 'infinitive', 'interjection', 'interrogative pronoun', 'intransitive verb', 
-           'noun', 'number', 'numeral', 'ordinal', 'ordinal number', 'part of speech', 'participle', 'particle', 
-           'personal pronoun', 'phrasal preposition', 'possessive adjective', 'possessive determiner', 'possessive pronoun', 
-           'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun', 
-           'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
+        user = os.environ['MYSQL_DB_USER']
+        password = os.environ['MYSQL_DB_PASSWORD']
+        host = '127.0.0.1'
+        database = 'etymology_explorer_staging'
+        conn = mysql.connector.connect(user=user, password=password, host=host, database=database)
+        cursor = conn.cursor()
+        cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
         
         # Option #2 for word-language pairs
-        #cursor.execute('SELECT word, language_name \
-        #                FROM etymologies e, languages l\
-        #                WHERE e.language_code = l.language_code AND _id NOT IN (SELECT etymology_id FROM entry_connections) \
-        #                limit 10')
-        #wls = [[w.decode('utf-8','replace').strip(), l.decode()] for w, l in cursor.fetchall()]; wls
-        #url_terms = [row[0] if not row[1].startswith('Proto') else 'Reconstruction:'+row[1]+'/'+row[0] for row in wls]; url_terms
-        #for url in set(url_terms):
-        #print(url)
-        
-     # Get the list of word-language pairs
-        df = pd.read_csv('~/etymology_files/ety_master.csv', 
-                 usecols = ['word', 'language'], 
-                 converters={'word' : str, 'language': str})
+        cursor.execute('SELECT * FROM languages')
+        lc2ln = {row[1].decode(): row[0].decode() for row in cursor.fetchall()}; lc2ln['alu']
 
-        # Set all non-reconstructions to be 'None'
-        normal_language_rows = [not language.startswith('Proto') for language in df['language'].tolist()] #bools
-        df.loc[normal_language_rows, 'language'] = None
-        df = df.drop_duplicates()
-        url_terms = [row[0] if row[1] is None else 'Reconstruction:'+row[1]+'/'+row[0] for row in df.values]
-        urls = ['https://en.wiktionary.org/api/rest_v1/page/html/' + term for term in url_terms]
+        cursor.execute('SELECT word, language_code FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
+        new_terms = [[row[0].decode().strip(), row[1].decode()] for row in cursor.fetchall()]
+
+        url_terms = [row[0] if not row[1].endswith('-pro') else 'Reconstruction:'+lc2ln[row[1]]+'/'+row[0] for row in new_terms]
         
-        for url in urls:
-            yield scrapy.Request(url=url, meta={'all_pos': all_pos}, callback=self.parse)
+        for term in set(url_terms):
+            url = 'https://en.wiktionary.org/api/rest_v1/page/html/' + term
+            yield scrapy.Request(url=url, meta={'term':term}, callback=self.parse)
         
     def parse(self, response):
         
@@ -44,7 +32,7 @@ class WiktionarySpider(scrapy.Spider):
         def getDefsFromPOS(ety_pronunc_pos_node):
             keep_def_tags = ('i', 'b', 'a', 'span', None)
             node_data = []
-	    if ety_pronunc_pos_node.parent.find('ol') is None: return None
+            if ety_pronunc_pos_node.parent.find('ol') is None: return None
             for li in list(ety_pronunc_pos_node.parent.find('ol').children): # get defs from ordered list
                 if li.name != 'li': continue # This is a newline tag
 
@@ -63,13 +51,21 @@ class WiktionarySpider(scrapy.Spider):
                     node_data.append(li.text.strip())
             return node_data
         
-        all_pos = response.meta['all_pos']
+        #all_pos = response.meta['all_pos']
+
+        all_pos = ['adfix', 'adjective', 'adnoun', 'adverb', 'article', 'auxiliary verb', 'cardinal number', 'collective numeral', 
+           'conjunction', 'coverb', 'demonstrative determiner', 'demonstrative pronoun', 'determinative', 'determiner', 
+           'gerund', 'indefinite pronoun', 'infinitive', 'interjection', 'interrogative pronoun', 'intransitive verb', 
+           'noun', 'number', 'numeral', 'ordinal', 'ordinal number', 'part of speech', 'participle', 'particle', 
+           'personal pronoun', 'phrasal preposition', 'possessive adjective', 'possessive determiner', 'possessive pronoun', 
+           'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun', 
+           'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
         
         soup = BeautifulSoup(response.body, 'html.parser')
         
-        page = response.url.replace('https://en.wiktionary.org/api/rest_v1/page/html/', '')
-        page = re.sub('Reconstruction:[^\/]+?\/(.*)', r'\1', page) #Remove reconstruction text if necessary
-        page_data = {'term': page} # Variable to store the data
+        #page = response.url.replace('https://en.wiktionary.org/api/rest_v1/page/html/', '')
+        #page = re.sub('Reconstruction:[^\/]+?\/(.*)', r'\1', page) #Remove reconstruction text if necessary
+        page_data = {'term': response.meta['term']} # Variable to store the data
 
         for lang_node in soup.find_all('h2'): # Go through each Language
             language = lang_node.text.strip()

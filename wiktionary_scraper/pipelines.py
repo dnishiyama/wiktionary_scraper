@@ -56,10 +56,10 @@ class WiktionaryScraperPipeline(object):
             self.cursor.execute(f'INSERT INTO {table}{col_text} VALUES {val_text}')
         
         word = item['term'] # Get the word for these entries
-        del item['term'] # Get that out of the way so only languages will now exist
 
-        for lang, entries in item.items():
-            language = lang
+        for key, entries in item.items():
+            if key == 'term': continue
+            language = key
 
             self.cursor.execute(
                 f'SELECT _id FROM etymologies e, languages l \
@@ -88,7 +88,7 @@ class WiktionaryScraperPipeline(object):
 
                     elif node_key in all_pos:
                         new_pos_key = getNewKey('pos_id', 'entry_pos')
-                        insert('entry_pos', pos=node_key, pos_id=new_pos_key, entry_id=new_entry_id)
+                        insert('entry_pos', pos_name=node_key, pos_id=new_pos_key, entry_id=new_entry_id)
 
                         for definition in node_value:
                             insert('entry_definitions', definition=definition, pos_id=new_pos_key)
