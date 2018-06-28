@@ -92,4 +92,5 @@ class WiktionaryScraperPipeline(object):
 
                         for definition in node_value:
                             insert('entry_definitions', definition=definition, pos_id=new_pos_key)
+        self.conn.commit()
         return item

@@ -20,10 +20,11 @@ class WiktionarySpider(scrapy.Spider):
         cursor.execute('SELECT word, language_code FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
         new_terms = [[row[0].decode().strip(), row[1].decode()] for row in cursor.fetchall()]
 
-        url_terms = [row[0] if not row[1].endswith('-pro') else 'Reconstruction:'+lc2ln[row[1]]+'/'+row[0] for row in new_terms]
+        url_terms = [row[0] if not row[1].endswith('-pro') else 'Reconstruction%3A'+lc2ln[row[1]]+'%2F'+row[0] for row in new_terms]
         
         for term in set(url_terms):
             url = 'https://en.wiktionary.org/api/rest_v1/page/html/' + term
+            term = re.sub('Reconstruction%3A.+?%2F(.*)', r'\1', term) #Remove reconstruction text if necessary
             yield scrapy.Request(url=url, meta={'term':term}, callback=self.parse)
         
     def parse(self, response):
