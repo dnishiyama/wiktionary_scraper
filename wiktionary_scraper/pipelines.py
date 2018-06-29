@@ -41,7 +41,11 @@ class WiktionaryScraperPipeline(object):
            'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
         
         def getNewKey(column, table):
-            self.cursor.execute(f'SELECT max({column}) FROM {table}')
+            try:
+                self.cursor.execute(f'SELECT max({column}) FROM {table}')
+            except Exception as e:
+                self.cursor.fetchall(); #Fetch to prevent this error from cascading
+                raise (e) # Raise so that no errors are introduced to the MYSQL Database
             max_entry_id = self.cursor.fetchone()[0]; 
             new_entry_id = max_entry_id + 1 if max_entry_id is not None else 0
             return new_entry_id
@@ -61,9 +65,13 @@ class WiktionaryScraperPipeline(object):
             if key == 'term': continue
             language = key
 
-            self.cursor.execute(
-                f'SELECT _id FROM etymologies e, languages l \
+            try:
+                self.cursor.execute(
+                    f'SELECT _id FROM etymologies e, languages l \
                     WHERE word = "{word}" and language_name = "{language}" and e.language_code = l.language_code')
+            except Exception as e:
+                self.cursor.fetchall(); #Fetch to prevent this error from cascading
+                raise (e) # Raise so that no errors are introduced to the MYSQL Database
             ety_id_result = self.cursor.fetchone()
             
             if ety_id_result is not None: 
@@ -92,5 +100,5 @@ class WiktionaryScraperPipeline(object):
 
                         for definition in node_value:
                             insert('entry_definitions', definition=definition, pos_id=new_pos_key)
-        self.conn.commit()
+#        self.conn.commit()
         return item
