@@ -62,6 +62,7 @@ class WiktionarySpider(scrapy.Spider):
            'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun', 
            'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
         
+        all_pos += ['infix', 'suffix', 'prefix', 'root']; # Needed for reconstructions
         soup = BeautifulSoup(response.body, 'html.parser')
         
         #page = response.url.replace('https://en.wiktionary.org/api/rest_v1/page/html/', '')

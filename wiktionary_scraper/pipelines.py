@@ -39,6 +39,7 @@ class WiktionaryScraperPipeline(object):
            'personal pronoun', 'phrasal preposition', 'possessive adjective', 'possessive determiner', 'possessive pronoun',
            'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun',
            'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
+        all_pos += ['infix', 'suffix', 'prefix', 'root']; # Needed for reconstruction
         
         def getNewKey(column, table):
             try:
