@@ -82,13 +82,21 @@ class WiktionarySpider(scrapy.Spider):
 		
 		for lang_node in soup.find_all('h2'): # Go through each Language
 			language = lang_node.text.strip()
-			language_entries = [{}]
+			language_entries = [{}] 
+			entry_number = 1 #List starts at 1 to match wiktionary
 
 			for ety_pronunc_pos_node in lang_node.parent.find_all('h3'): # Go through each ety,pronu, or pos
-				node_data = []
 				node_class = re.sub('_\d+| \d+', '', ety_pronunc_pos_node.text).lower() #removed '_x' info
 
-				if node_class == 'etymology':
+				if node_class == 'etymology': #Have to assume that etymologies are the first item of new entries if there are multipl (ety can be any of only entry)
+					if entry_number != 1 or 'etymology' in language_entries[0]:
+						entry_number = len(language_entries) + 1
+						language_entries.append({})
+				
+					# If the entry number is 1, then need to add to it if there is no etymology, or if there is an etymology, then increment the entry_number
+					# if entry number is not 1 then increment it
+					# Set entry number based on the number of etymologies saved (could be set based on etymology_1 name)
+
 					#Only looking at the first <p> element for etymology text
 					p_node = ety_pronunc_pos_node.parent.find('p')
 					if p_node is not None: 
@@ -104,24 +112,23 @@ class WiktionarySpider(scrapy.Spider):
 							else:
 								entry_data[sub_ety_pos.text.lower()] = defs
 
-					if any(['etymology' in entry for entry in language_entries]): #If an etymology already exists add to new entry
-						language_entries.append(entry_data)
-					else:
-						language_entries[0].update(entry_data)
+					#if any(['etymology' in entry for entry in language_entries]): #If an etymology already exists add to new entry
+					#	language_entries.append(entry_data)
+					#else:
+					language_entries[entry_number - 1].update(entry_data) #Set the entry number with this etymology data
 
 				# Need to see if there are sub items of this etymology
 				elif node_class == 'pronunciation':
 					ipa_nodes = ety_pronunc_pos_node.parent.select('span.IPA') #dataquest.io/blog/web-scraping-tutorial-python/
 					if ipa_nodes: #Only add pronunciation if there are ipa_nodes
-						node_data = ipa_nodes[0].text
-						language_entries[0]['pronunciation'] = node_data
+						language_entries[entry_number - 1]['pronunciation'] = ipa_nodes[0].text
 
 				elif node_class in all_pos: # Here are the definitions
 					defs = getDefsFromPOS(ety_pronunc_pos_node)
 					if defs is None:
 						continue
 					else:
-						language_entries[0][node_class] = defs
+						language_entries[entry_number - 1][node_class] = defs
 
 				else: # Skip all other node_classes
 					continue

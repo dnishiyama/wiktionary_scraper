@@ -43,13 +43,16 @@ class WiktionaryScraperPipeline(object):
 		   'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
 		all_pos += ['infix', 'suffix', 'prefix', 'root']; # Needed for reconstruction
 		
-		def getNewKey(column, table):
+		def execute_sql(sql, debug=False):	
 			try:
-				self.cursor.execute(f'SELECT max({column}) FROM {table}')
+				self.cursor.execute(sql)
 			except Exception as e:
 				self.cursor.fetchall(); #Fetch to prevent this error from cascading
 				raise (e) # Raise so that no errors are introduced to the MYSQL Database
-			max_entry_id = self.cursor.fetchone()[0]; 
+			return self.cursor.fetchall()
+		
+		def getNewKey(column, table):
+			max_entry_id = execute_sql(f'SELECT max({column}) FROM {table}')[0][0]
 			new_entry_id = max_entry_id + 1 if max_entry_id is not None else 0
 			return new_entry_id
 		
@@ -61,34 +64,38 @@ class WiktionaryScraperPipeline(object):
 			val_text = '('+', '.join(values)+')'
 			
 			self.cursor.execute(f'INSERT INTO {table}{col_text} VALUES {val_text}')
-		
+	
 		word = item['term'] # Get the word for these entries
 		
 		for key, entries in item.items():
 			if key in ('term', 'status'): continue
 			language = key
 
-			try:
-				self.cursor.execute(
-					f'SELECT _id FROM etymologies e, languages l \
-					WHERE word = "{word}" and language_name = "{language}" and e.language_code = l.language_code')
-			except Exception as e:
-				self.cursor.fetchall(); #Fetch to prevent this error from cascading
-				raise (e) # Raise so that no errors are introduced to the MYSQL Database
-			ety_id_result = self.cursor.fetchone()
+			sql = f'SELECT _id FROM etymologies e, languages l WHERE word = "{word}" and language_name = "{language}" and e.language_code = l.language_code'
+			ety_id_result = execute_sql(sql)
 			
-			if ety_id_result is not None: 
-				ety_id = ety_id_result[0]
+			if ety_id_result: 
+				ety_id = ety_id_result[0][0]
 			else:
 				ety_id = getNewKey('_id', 'etymologies') + 1
 				self.cursor.execute(
 					f'INSERT INTO etymologies(_id, word, language_code) \
 						SELECT {ety_id}, "{word}", language_code FROM languages WHERE language_name = "{language}"')
+			
+			self.cursor.execute(f'SELECT entry_id, entry_number FROM entry_connections WHERE etymology_id = {ety_id}')
+			existing_entries = self.cursor.fetchall()
+
+			for entry_number, entry in enumerate(entries):
+				# Or I could check for old entries and update if there are changes
 				
-			for entry in entries:
+				#Get the entries for this etymology (e.g. 1-9)
+				# If there are more old entries then delete the remaining				
+				
+
+
 				# Get a new entry key, make the entry connection
 				new_entry_id = getNewKey('entry_id', 'entry_connections')
-				insert('entry_connections', etymology_id=ety_id, entry_id=new_entry_id)
+				insert('entry_connections', etymology_id=ety_id, entry_number=entry_number+1, entry_id=new_entry_id)
 
 				for node_key, node_value in entry.items():
 					if node_key == 'pronunciation':
