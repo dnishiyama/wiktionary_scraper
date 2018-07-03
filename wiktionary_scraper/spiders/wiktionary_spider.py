@@ -10,23 +10,20 @@ class WiktionarySpider(scrapy.Spider):
 	password = os.environ['MYSQL_DB_PASSWORD']
 	host = '127.0.0.1'
 	database = 'etymology_explorer_staging'
-	conn = None
-	cursor = None
+	conn = None; cursor = None
 
 	def __init__(self, *a, **kw):
 		super(WiktionarySpider, self).__init__(*a, **kw)
 		self.conn = mysql.connector.connect(user=self.user, password=self.password, host=self.host, database=self.database)
-		
-	def start_requests(self):
-
-		#conn = mysql.connector.connect(user=self.user, password=self.password, host=self.host, database=self.database)
+	
+	# Function called by scrapy.	
+	def start_requests(self):	
 		self.cursor = self.conn.cursor()
 		self.cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
 		
 		self.cursor.execute('SELECT * FROM languages')
 		lc2ln = {row[1].decode(): row[0].decode() for row in self.cursor.fetchall()}; lc2ln['alu']
-
-		#Ignore pulls of etymologies if they already have an entry_connection
+		
 		self.cursor.execute('SELECT word, language_code FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
 		new_terms = [[row[0].decode().strip(), row[1].decode()] for row in self.cursor.fetchall()]
 		

@@ -15,14 +15,16 @@ class WiktionaryScraperPipeline(object):
 		self.user = os.environ['MYSQL_DB_USER']
 		self.password = os.environ['MYSQL_DB_PASSWORD']
 		self.host = '127.0.0.1'
-		self.database = 'etymology_explorer_staging'
+		self.staging_database = 'etymology_explorer_staging'
+		self.live_database = 'etymology_explorer'
 
 	@classmethod
 	def from_crawler(cls, crawler):
 		return cls()
 
-	def open_spider(self, spider):
-		self.conn = mysql.connector.connect(user=self.user, password=self.password, host=self.host, database=self.database)
+	def open_spider(self, spider, live=False):
+		database = self.live_database if live else self.staging_database
+		self.conn = mysql.connector.connect(user=self.user, password=self.password, host=self.host, database=database)
 		self.cursor = self.conn.cursor()
 		self.cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
 
