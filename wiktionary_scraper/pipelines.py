@@ -43,7 +43,8 @@ class WiktionaryScraperPipeline(object):
 		   'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
 		all_pos += ['infix', 'suffix', 'prefix', 'root']; # Needed for reconstruction
 		
-		def execute_sql(sql, debug=False):	
+		def execute_sql(sql, debug=False):
+			"""Returns the fetchall() result after error catching"""
 			try:
 				self.cursor.execute(sql)
 			except Exception as e:
@@ -52,18 +53,29 @@ class WiktionaryScraperPipeline(object):
 			return self.cursor.fetchall()
 		
 		def getNewKey(column, table):
-			max_entry_id = execute_sql(f'SELECT max({column}) FROM {table}')[0][0]
-			new_entry_id = max_entry_id + 1 if max_entry_id is not None else 0
+			new_entry_id = execute_sql(f"""SELECT MIN(t1.{column})
+				FROM(
+					SELECT 1 AS {column}
+					UNION ALL
+					SELECT {column} + 1
+					FROM {table}
+				) t1
+				LEFT OUTER JOIN {table} t2
+				ON t1.{column} = t2.{column}
+				WHERE t2.{column} IS NULL;""")[0][0]
+			#max_entry_id = execute_sql(f'SELECT max({column}) FROM {table}')[0][0]
+			#new_entry_id = max_entry_id + 1 if max_entry_id is not None else 0
 			return new_entry_id
 		
-		def insert(table, **kwargs):
+		def insert(table, replace=False, **kwargs):
+			insert = 'REPLACE' if replace else 'INSERT' 
 			columns = [str(k) for k,v in kwargs.items()]
 			col_text = '('+', '.join(columns)+')'
 			
 			values = [str(v) if type(v) != str else repr(v) for k,v in kwargs.items()]
 			val_text = '('+', '.join(values)+')'
 			
-			self.cursor.execute(f'INSERT INTO {table}{col_text} VALUES {val_text}')
+			self.cursor.execute(f'{insert} INTO {table}{col_text} VALUES {val_text}')
 	
 		word = item['term'] # Get the word for these entries
 		
@@ -82,27 +94,41 @@ class WiktionaryScraperPipeline(object):
 					f'INSERT INTO etymologies(_id, word, language_code) \
 						SELECT {ety_id}, "{word}", language_code FROM languages WHERE language_name = "{language}"')
 			
+			# Get all the existing entries to compare for updates / leaving alone
 			self.cursor.execute(f'SELECT entry_id, entry_number FROM entry_connections WHERE etymology_id = {ety_id}')
 			existing_entries = self.cursor.fetchall()
 
 			for entry_number, entry in enumerate(entries):
-				# Or I could check for old entries and update if there are changes
-				
-				#Get the entries for this etymology (e.g. 1-9)
-				# If there are more old entries then delete the remaining				
-				
 
+				# Get the matching entry_id based on entry_number
+				matching_entry = [row[0] for row in existing_entries if row[1] == entry_number + 1]
 
+				if matching_entry: #If the entries already exist, delete the existing (except the etymology) update etymologies if they are different
+					new_entry_id = matching_entry[0]
+
+					#Deleting existing entry information (except for etymology data)
+					self.cursor.execute(f'DELETE ed, ep FROM entry_definitions ed JOIN entry_pos ep ON ed.pos_id = ep.pos_id WHERE ep.entry_id = {new_entry_id}')
+					self.cursor.execute(f'DELETE FROM entry_pronunciations WHERE entry_id = {new_entry_id}')
+
+				else: # If the entry number doesn't exist, then make a new entry for it 
 				# Get a new entry key, make the entry connection
-				new_entry_id = getNewKey('entry_id', 'entry_connections')
-				insert('entry_connections', etymology_id=ety_id, entry_number=entry_number+1, entry_id=new_entry_id)
-
+					new_entry_id = getNewKey('entry_id', 'entry_connections')
+					insert('entry_connections', etymology_id=ety_id, entry_number=entry_number+1, entry_id=new_entry_id)
+				
+				# Now insert all the new entry data
 				for node_key, node_value in entry.items():
 					if node_key == 'pronunciation':
 						insert('entry_pronunciations', pronunciation=node_value, entry_id=new_entry_id)
 
+					#Special case, update if it is different, with the new_connections flag as 1
 					elif node_key == 'etymology':
-						insert('entry_etymologies', etymology=node_value, entry_id=new_entry_id)
+
+						# If an etymology already exists for this entry, and it is the same, update, otherwise skip
+						existing_etymology = execute_sql(f'SELECT etymology FROM entry_etymologies WHERE entry_id = {new_entry_id}')
+						if existing_etymology and existing_etymology[0][0].decode() != node_value:
+							insert('entry_etymologies', replace=True, etymology=node_value, entry_id=new_entry_id, new_connections=1)
+						elif not existing_etymology: 
+							insert('entry_etymologies', etymology=node_value, entry_id=new_entry_id, new_connections=1)
 
 					elif node_key in all_pos:
 						new_pos_key = getNewKey('pos_id', 'entry_pos')
