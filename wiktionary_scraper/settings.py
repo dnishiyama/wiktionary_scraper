@@ -91,4 +91,5 @@ ITEM_PIPELINES = {
 
 # Log Level
 LOG_LEVEL = 'INFO'
+LOG_STDOUT = True
 LOG_FILE = '/home/ubuntu/scrapy/wiktionary_scraper/output/error_log'

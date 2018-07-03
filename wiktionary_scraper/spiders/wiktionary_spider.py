@@ -6,28 +6,43 @@ from twisted.internet.error import TimeoutError, TCPTimedOutError
 
 class WiktionarySpider(scrapy.Spider):
 	name = "wiktionary_spider"
-	
-	def start_requests(self):
-		user = os.environ['MYSQL_DB_USER']
-		password = os.environ['MYSQL_DB_PASSWORD']
-		host = '127.0.0.1'
-		database = 'etymology_explorer_staging'
-		conn = mysql.connector.connect(user=user, password=password, host=host, database=database)
-		cursor = conn.cursor()
-		cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
+	user = os.environ['MYSQL_DB_USER']
+	password = os.environ['MYSQL_DB_PASSWORD']
+	host = '127.0.0.1'
+	database = 'etymology_explorer_staging'
+	conn = None
+	cursor = None
+
+	def __init__(self, *a, **kw):
+		super(WiktionarySpider, self).__init__(*a, **kw)
+		self.conn = mysql.connector.connect(user=self.user, password=self.password, host=self.host, database=self.database)
 		
-		cursor.execute('SELECT * FROM languages')
-		lc2ln = {row[1].decode(): row[0].decode() for row in cursor.fetchall()}; lc2ln['alu']
+	def start_requests(self):
 
-		cursor.execute('SELECT word, language_code FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
-		new_terms = [[row[0].decode().strip(), row[1].decode()] for row in cursor.fetchall()]
+		#conn = mysql.connector.connect(user=self.user, password=self.password, host=self.host, database=self.database)
+		self.cursor = self.conn.cursor()
+		self.cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
+		
+		self.cursor.execute('SELECT * FROM languages')
+		lc2ln = {row[1].decode(): row[0].decode() for row in self.cursor.fetchall()}; lc2ln['alu']
 
+		#Ignore pulls of etymologies if they already have an entry_connection
+		self.cursor.execute('SELECT word, language_code FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
+		new_terms = [[row[0].decode().strip(), row[1].decode()] for row in self.cursor.fetchall()]
+		
 		url_terms = [row[0] if not row[1].endswith('-pro') else 'Reconstruction%3A'+lc2ln[row[1]]+'%2F'+row[0] for row in new_terms]
 		
-		for term in set(url_terms):
-			url = 'https://en.wiktionary.org/api/rest_v1/page/html/' + term
-			term = re.sub('Reconstruction%3A.+?%2F(.*)', r'\1', term) #Remove reconstruction text if necessary
-			yield scrapy.Request(url=url, meta={'term':term}, callback=self.parse, errback=self.errback)
+		#Get bad urls (suffices) that have received 404 responses
+		self.cursor.execute('SELECT url_suffix FROM wiktionary_page_dne')
+		bad_url_suffices = set([row[0] for row in self.cursor.fetchall()])
+
+		for url_suffix in set(url_terms):
+			if url_suffix in bad_url_suffices: 
+				#self.logger.info('Skipping ' + url_suffix + ' due to past 404')
+				continue #skip urls that have been 404s in the past
+			url = 'https://en.wiktionary.org/api/rest_v1/page/html/' + url_suffix
+			term = re.sub('Reconstruction%3A.+?%2F(.*)', r'\1', url_suffix) #Remove reconstruction text if necessary
+			yield scrapy.Request(url=url, meta={'term':term, 'url_suffix': url_suffix}, callback=self.parse, errback=self.errback)
 		
 	def parse(self, response):
 		
@@ -129,8 +144,11 @@ class WiktionarySpider(scrapy.Spider):
 			# these exceptions come from HttpError spider middleware
 			# you can get the non-200 response
 			response = failure.value.response
+			term = response.meta['term']
 			if response.status != 404:
 				self.logger.error('HttpError on %s', response.url)
+			else:
+				self.cursor.execute(f'INSERT IGNORE INTO wiktionary_page_dne VALUES({repr(term)})')
 
 		elif failure.check(DNSLookupError):
 			# this is the original request
@@ -145,3 +163,7 @@ class WiktionarySpider(scrapy.Spider):
 		else:
 			self.logger.error('Unknown Error!')
 			self.logger.error(repr(failure))
+
+	def closed(self, reason):
+		self.conn.commit()
+		self.conn.close()
