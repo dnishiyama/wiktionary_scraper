@@ -1,3 +1,4 @@
 wiktionary_scraper/output
+wiktionary_scraper/dl_data
 **/__pycache__/**
 **/.ipynb_checkpoints/**
