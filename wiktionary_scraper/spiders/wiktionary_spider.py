@@ -11,6 +11,14 @@ class WiktionarySpider(scrapy.Spider):
 	host = '127.0.0.1'
 	database = 'etymology_explorer_staging'
 	conn = None; cursor = None
+	all_pos = ['adfix', 'adjective', 'adnoun', 'adverb', 'article', 'auxiliary verb', 'cardinal number', 'collective numeral', 
+		'conjunction', 'coverb', 'demonstrative determiner', 'demonstrative pronoun', 'determinative', 'determiner', 
+		'gerund', 'indefinite pronoun', 'infinitive', 'interjection', 'interrogative pronoun', 'intransitive verb', 
+		'noun', 'number', 'numeral', 'ordinal', 'ordinal number', 'part of speech', 'participle', 'particle', 
+		'personal pronoun', 'phrasal preposition', 'possessive adjective', 'possessive determiner', 'possessive pronoun', 
+		'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun', 
+		'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun', 
+		'infix', 'suffix', 'prefix', 'root'] # Last 4 needed for reconstructions
 
 	def __init__(self, *a, **kw):
 		super(WiktionarySpider, self).__init__(*a, **kw)
@@ -66,15 +74,6 @@ class WiktionarySpider(scrapy.Spider):
 					node_data.append(li.text.strip())
 			return node_data
 		
-		all_pos = ['adfix', 'adjective', 'adnoun', 'adverb', 'article', 'auxiliary verb', 'cardinal number', 'collective numeral', 
-		   'conjunction', 'coverb', 'demonstrative determiner', 'demonstrative pronoun', 'determinative', 'determiner', 
-		   'gerund', 'indefinite pronoun', 'infinitive', 'interjection', 'interrogative pronoun', 'intransitive verb', 
-		   'noun', 'number', 'numeral', 'ordinal', 'ordinal number', 'part of speech', 'participle', 'particle', 
-		   'personal pronoun', 'phrasal preposition', 'possessive adjective', 'possessive determiner', 'possessive pronoun', 
-		   'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun', 
-		   'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
-		all_pos += ['infix', 'suffix', 'prefix', 'root']; # Needed for reconstructions
-		
 		page_data = {'term': response.meta['term'], 'status': response.status} # Variable to store the data
 		# Check for 404 and save word in database. Save to wiktionary_page_dne if MYSQL is 404
 
@@ -105,7 +104,7 @@ class WiktionarySpider(scrapy.Spider):
 						continue
 
 					for sub_ety_pos in ety_pronunc_pos_node.parent.find_all('h4'):
-						if sub_ety_pos.text.lower() in all_pos:
+						if sub_ety_pos.text.lower() in self.all_pos:
 							defs = getDefsFromPOS(sub_ety_pos)
 							if defs is None:
 								continue
@@ -123,7 +122,7 @@ class WiktionarySpider(scrapy.Spider):
 					if ipa_nodes: #Only add pronunciation if there are ipa_nodes
 						language_entries[entry_number - 1]['pronunciation'] = ipa_nodes[0].text
 
-				elif node_class in all_pos: # Here are the definitions
+				elif node_class in self.all_pos: # Here are the definitions
 					defs = getDefsFromPOS(ety_pronunc_pos_node)
 					if defs is None:
 						continue

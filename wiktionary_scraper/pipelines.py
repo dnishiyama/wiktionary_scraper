@@ -32,16 +32,8 @@ class WiktionaryScraperPipeline(object):
 		self.conn.commit()
 		self.conn.close()
 
-	def process_item(self, item, spider):
-		
-		all_pos = ['adfix', 'adjective', 'adnoun', 'adverb', 'article', 'auxiliary verb', 'cardinal number', 'collective numeral',
-		   'conjunction', 'coverb', 'demonstrative determiner', 'demonstrative pronoun', 'determinative', 'determiner',
-		   'gerund', 'indefinite pronoun', 'infinitive', 'interjection', 'interrogative pronoun', 'intransitive verb',
-		   'noun', 'number', 'numeral', 'ordinal', 'ordinal number', 'part of speech', 'participle', 'particle',
-		   'personal pronoun', 'phrasal preposition', 'possessive adjective', 'possessive determiner', 'possessive pronoun',
-		   'postposition', 'preposition', 'preverb', 'pronoun', 'quasi-adjective', 'reciprocal pronoun', 'reflexive pronoun',
-		   'relative pronoun', 'speech disfluency', 'substantive', 'transitive', 'transitive verb', 'verb', 'verbal noun']
-		all_pos += ['infix', 'suffix', 'prefix', 'root']; # Needed for reconstruction
+	def process_item(self, item, spider):	
+		all_pos = spider.all_pos
 		
 		def execute_sql(sql, debug=False):
 			"""Returns the fetchall() result after error catching"""
