@@ -29,13 +29,10 @@ class WiktionarySpider(scrapy.Spider):
 		self.cursor = self.conn.cursor()
 		self.cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
 		
-		self.cursor.execute('SELECT * FROM languages')
-		lc2ln = {row[1].decode(): row[0].decode() for row in self.cursor.fetchall()}; lc2ln['alu']
-		
-		self.cursor.execute('SELECT word, language_code FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
+		self.cursor.execute('SELECT word, language_name FROM etymologies WHERE _id NOT IN (SELECT DISTINCT etymology_id FROM entry_connections)')
 		new_terms = [[row[0].decode().strip(), row[1].decode()] for row in self.cursor.fetchall()]
 		
-		url_terms = [row[0] if not row[1].endswith('-pro') else 'Reconstruction%3A'+lc2ln[row[1]]+'%2F'+row[0] for row in new_terms]
+		url_terms = [row[0] if not row[1].startswith('Proto') else 'Reconstruction%3A'+row[1]+'%2F'+row[0] for row in new_terms]
 		
 		#Get bad urls (suffices) that have received 404 responses
 		self.cursor.execute('SELECT url_suffix FROM wiktionary_page_dne')

@@ -17,6 +17,7 @@ class WiktionaryScraperPipeline(object):
 		self.host = '127.0.0.1'
 		self.staging_database = 'etymology_explorer_staging'
 		self.live_database = 'etymology_explorer'
+		self.all_pos = None
 
 	@classmethod
 	def from_crawler(cls, crawler):
@@ -28,63 +29,27 @@ class WiktionaryScraperPipeline(object):
 		self.cursor = self.conn.cursor()
 		self.cursor.execute('SET NAMES utf8mb4;') #To avoid unicode issues
 
+		self.all_pos = spider.all_pos
+
 	def close_spider(self, spider):
 		self.conn.commit()
 		self.conn.close()
 
 	def process_item(self, item, spider):	
-		all_pos = spider.all_pos
-		
-		def execute_sql(sql, debug=False):
-			"""Returns the fetchall() result after error catching"""
-			try:
-				self.cursor.execute(sql)
-			except Exception as e:
-				self.cursor.fetchall(); #Fetch to prevent this error from cascading
-				raise (e) # Raise so that no errors are introduced to the MYSQL Database
-			return self.cursor.fetchall()
-		
-		def getNewKey(column, table):
-			new_entry_id = execute_sql(f"""SELECT MIN(t1.{column})
-				FROM(
-					SELECT 1 AS {column}
-					UNION ALL
-					SELECT {column} + 1
-					FROM {table}
-				) t1
-				LEFT OUTER JOIN {table} t2
-				ON t1.{column} = t2.{column}
-				WHERE t2.{column} IS NULL;""")[0][0]
-			#max_entry_id = execute_sql(f'SELECT max({column}) FROM {table}')[0][0]
-			#new_entry_id = max_entry_id + 1 if max_entry_id is not None else 0
-			return new_entry_id
-		
-		def insert(table, replace=False, **kwargs):
-			insert = 'REPLACE' if replace else 'INSERT' 
-			columns = [str(k) for k,v in kwargs.items()]
-			col_text = '('+', '.join(columns)+')'
-			
-			values = [str(v) if type(v) != str else repr(v) for k,v in kwargs.items()]
-			val_text = '('+', '.join(values)+')'
-			
-			self.cursor.execute(f'{insert} INTO {table}{col_text} VALUES {val_text}')
-	
 		word = item['term'] # Get the word for these entries
 		
 		for key, entries in item.items():
 			if key in ('term', 'status'): continue
 			language = key
 
-			sql = f'SELECT _id FROM etymologies e, languages l WHERE word = "{word}" and language_name = "{language}" and e.language_code = l.language_code'
-			ety_id_result = execute_sql(sql)
+			sql = f'SELECT _id FROM etymologies WHERE word = {repr(word)} and language_name = {repr(language)}'
+			ety_id_result = self.execute_sql(sql)
 			
 			if ety_id_result: 
 				ety_id = ety_id_result[0][0]
 			else:
-				ety_id = getNewKey('_id', 'etymologies') + 1
-				self.cursor.execute(
-					f'INSERT INTO etymologies(_id, word, language_code) \
-						SELECT {ety_id}, "{word}", language_code FROM languages WHERE language_name = "{language}"')
+				ety_id = self.getNewKey('_id', 'etymologies')
+				self.cursor.execute(f'INSERT INTO etymologies(_id, word, language_name) VALUES ({ety_id}, {repr(word)}, {repr(language)})')
 			
 			# Get all the existing entries to compare for updates / leaving alone
 			self.cursor.execute(f'SELECT entry_id, entry_number FROM entry_connections WHERE etymology_id = {ety_id}')
@@ -104,28 +69,74 @@ class WiktionaryScraperPipeline(object):
 
 				else: # If the entry number doesn't exist, then make a new entry for it 
 				# Get a new entry key, make the entry connection
-					new_entry_id = getNewKey('entry_id', 'entry_connections')
-					insert('entry_connections', etymology_id=ety_id, entry_number=entry_number+1, entry_id=new_entry_id)
+					new_entry_id = self.getNewKey('entry_id', 'entry_connections')
+					self.insert('entry_connections', etymology_id=ety_id, entry_number=entry_number+1, entry_id=new_entry_id)
 				
-				# Now insert all the new entry data
+				# Now self.insert all the new entry data
 				for node_key, node_value in entry.items():
 					if node_key == 'pronunciation':
-						insert('entry_pronunciations', pronunciation=node_value, entry_id=new_entry_id)
+						self.insert('entry_pronunciations', pronunciation=node_value, entry_id=new_entry_id)
 
 					#Special case, update if it is different, with the new_connections flag as 1
 					elif node_key == 'etymology':
 
 						# If an etymology already exists for this entry, and it is the same, update, otherwise skip
-						existing_etymology = execute_sql(f'SELECT etymology FROM entry_etymologies WHERE entry_id = {new_entry_id}')
-						if existing_etymology and existing_etymology[0][0].decode() != node_value:
-							insert('entry_etymologies', replace=True, etymology=node_value, entry_id=new_entry_id, new_connections=1)
+						existing_etymology = self.execute_sql(f'SELECT etymology, lock_code FROM entry_etymologies WHERE entry_id = {new_entry_id}')
+						if existing_etymology and existing_etymology[0][0].decode() != node_value and existing_etymology[0][1] == 0: #and it isn't locked
+							self.insert('entry_etymologies', replace=True, 
+								etymology=node_value, entry_id=new_entry_id, new_connections=1, connection_code='None', lock_code = 0)
+							self.generateConnections(new_entry_id, node_value)
 						elif not existing_etymology: 
-							insert('entry_etymologies', etymology=node_value, entry_id=new_entry_id, new_connections=1)
+							self.insert('entry_etymologies', 
+								etymology=node_value, entry_id=new_entry_id, new_connections=1, connection_code='None', lock_code = 0)
+							self.generateConnections(new_entry_id, node_value)
 
-					elif node_key in all_pos:
-						new_pos_key = getNewKey('pos_id', 'entry_pos')
-						insert('entry_pos', pos_name=node_key, pos_id=new_pos_key, entry_id=new_entry_id)
+					elif node_key in self.all_pos:
+						new_pos_key = self.getNewKey('pos_id', 'entry_pos')
+						self.insert('entry_pos', pos_name=node_key, pos_id=new_pos_key, entry_id=new_entry_id)
 
 						for definition in node_value:
-							insert('entry_definitions', definition=definition, pos_id=new_pos_key)
+							self.insert('entry_definitions', definition=definition, pos_id=new_pos_key)
 		return item
+
+	def generateConnections(self, entry_id, etymology):
+		#Make the connection code from the etymology
+		#Insert that connection code into the MYSQL @ that entry_id, lock_code still 0, new_connections = 0
+		#Check for errors in the connection code
+		#If there are none, generate the connections from the connection code
+		#Add the connections and the connection sources to the MYSQL database
+		print('Generating connections for', entry_id, etymology);
+
+	def execute_sql(self, sql, debug=False):
+		"""Returns the fetchall() result after error catching"""
+		try:
+			self.cursor.execute(sql)
+		except Exception as e:
+			self.cursor.fetchall(); #Fetch to prevent this error from cascading
+			raise (e) # Raise so that no errors are introduced to the MYSQL Database
+		return self.cursor.fetchall()
+	
+	def getNewKey(self, column, table):
+		new_entry_id = self.execute_sql(f"""SELECT MIN(t1.{column})
+			FROM(
+				SELECT 1 AS {column}
+				UNION ALL
+				SELECT {column} + 1
+				FROM {table}
+			) t1
+			LEFT OUTER JOIN {table} t2
+			ON t1.{column} = t2.{column}
+			WHERE t2.{column} IS NULL;""")[0][0]
+		#max_entry_id = self.execute_sql(f'SELECT max({column}) FROM {table}')[0][0]
+		#new_entry_id = max_entry_id + 1 if max_entry_id is not None else 0
+		return new_entry_id
+	
+	def insert(self, table, replace=False, **kwargs):
+		insert = 'REPLACE' if replace else 'INSERT' 
+		columns = [str(k) for k,v in kwargs.items()]
+		col_text = '('+', '.join(columns)+')'
+		
+		values = [str(v) if type(v) != str else repr(v) for k,v in kwargs.items()]
+		val_text = '('+', '.join(values)+')'
+		
+		self.cursor.execute(f'{insert} INTO {table}{col_text} VALUES {val_text}')
