@@ -71,7 +71,9 @@ class WiktionarySpider(scrapy.Spider):
 					node_data.append(li.text.strip())
 			return node_data
 		
-		page_data = {'term': response.meta['term'], 'status': response.status} # Variable to store the data
+
+		term = response.meta['term']	
+		page_data = {'term': term, 'status': response.status} # Variable to store the data
 		# Check for 404 and save word in database. Save to wiktionary_page_dne if MYSQL is 404
 
 		soup = BeautifulSoup(response.body, 'html.parser')
@@ -96,7 +98,7 @@ class WiktionarySpider(scrapy.Spider):
 					#Only looking at the first <p> element for etymology text
 					p_node = ety_pronunc_pos_node.parent.find('p')
 					if p_node is not None: 
-						entry_data = {'etymology': p_node.text.replace('\u200e', '')}
+						entry_data = {'etymology': language + " " + term + " : " + p_node.text.replace('\u200e', '')}
 					else:
 						continue
 
